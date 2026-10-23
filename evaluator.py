@@ -5,7 +5,10 @@ from typing import Dict, List, Optional
 
 from langchain_groq import ChatGroq
 from langchain_core.embeddings import Embeddings
-from sklearn.feature_extraction.text import HashingVectorizer
+import zlib
+
+import numpy as np
+from rag import tokens
 from ragas import SingleTurnSample
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from ragas.llms import LangchainLLMWrapper
@@ -20,19 +23,22 @@ from ragas.metrics import (
 
 
 class HashingEmbeddings(Embeddings):
-    """Stateless keyword-style embeddings (no PyTorch / no downloads)."""
+    """Stateless keyword-style embeddings (no PyTorch, no downloads, no compiled deps)."""
 
-    def __init__(self):
-        self.vec = HashingVectorizer(
-            n_features=2 ** 12, ngram_range=(1, 2), alternate_sign=False,
-            norm="l2", stop_words="english",
-        )
+    DIM = 4096
+
+    def _one(self, text):
+        v = np.zeros(self.DIM)
+        for t in tokens(text):
+            v[zlib.crc32(t.encode()) % self.DIM] += 1.0
+        n = np.linalg.norm(v)
+        return (v / n if n else v).tolist()
 
     def embed_documents(self, texts):
-        return self.vec.transform(texts).toarray().tolist()
+        return [self._one(t) for t in texts]
 
     def embed_query(self, text):
-        return self.embed_documents([text])[0]
+        return self._one(text)
 
 
 def _build():
