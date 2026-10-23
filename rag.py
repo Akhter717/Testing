@@ -82,7 +82,7 @@ def answer(question: str, contexts: List[Chunk]) -> str:
         f"[{c.source} p.{c.page}]\n{c.text}" for c in contexts
     )
     resp = client.chat.completions.create(
-        model=os.getenv("RAG_MODEL", "llama-3.1-8b-instant"),
+        model=os.getenv("RAG_MODEL", "openai/gpt-oss-20b"),
         temperature=0,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
