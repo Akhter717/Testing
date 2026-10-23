@@ -57,7 +57,7 @@ class HashingEmbeddings(Embeddings):
 def _build():
     judge = LangchainLLMWrapper(
         ChatGroq(
-            model=os.getenv("JUDGE_MODEL", "llama-3.3-70b-versatile"),
+            model=os.getenv("JUDGE_MODEL", "openai/gpt-oss-120b"),
             temperature=0,
             max_retries=5,
         )
