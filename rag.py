@@ -1,12 +1,16 @@
-"""RAG pipeline: PDF -> chunks -> TF-IDF retrieval (no PyTorch) -> Groq answer."""
+"""RAG pipeline: PDF -> chunks -> pure-Python TF-IDF retrieval -> Groq answer.
+No compiled dependencies (works on locked-down Windows laptops)."""
 import os
 from dataclasses import dataclass
 from typing import List
 
-import fitz  # PyMuPDF
-import numpy as np
+import io
+import math
+import re
+from collections import Counter
+
 from groq import Groq
-from sklearn.feature_extraction.text import TfidfVectorizer
+from pypdf import PdfReader
 
 CHUNK_SIZE = 800      # characters
 CHUNK_OVERLAP = 150
@@ -25,17 +29,26 @@ class Chunk:
     page: int
 
 
+STOP = set("a an the of to in on for and or is are was were be by with as at from that this it its if "
+           "then than into can will you your not no do does how what which when where who".split())
+
+
+def tokens(text: str) -> List[str]:
+    words = [w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in STOP]
+    return words + [f"{a}_{b}" for a, b in zip(words, words[1:])]
+
+
 def chunk_pdf(file_bytes: bytes, filename: str) -> List[Chunk]:
     chunks: List[Chunk] = []
-    with fitz.open(stream=file_bytes, filetype="pdf") as doc:
-        for page_no, page in enumerate(doc, start=1):
-            text = " ".join(page.get_text("text").split())
-            start = 0
-            while start < len(text):
-                piece = text[start:start + CHUNK_SIZE].strip()
-                if len(piece) > 50:
-                    chunks.append(Chunk(piece, filename, page_no))
-                start += CHUNK_SIZE - CHUNK_OVERLAP
+    reader = PdfReader(io.BytesIO(file_bytes))
+    for page_no, page in enumerate(reader.pages, start=1):
+        text = " ".join((page.extract_text() or "").split())
+        start = 0
+        while start < len(text):
+            piece = text[start:start + CHUNK_SIZE].strip()
+            if len(piece) > 50:
+                chunks.append(Chunk(piece, filename, page_no))
+            start += CHUNK_SIZE - CHUNK_OVERLAP
     return chunks
 
 
@@ -44,14 +57,23 @@ class RagIndex:
         if not chunks:
             raise ValueError("No text could be extracted from the PDF(s). Scanned PDFs need OCR.")
         self.chunks = chunks
-        self.vec = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True, stop_words="english")
-        self.matrix = self.vec.fit_transform([c.text for c in chunks])  # L2-normalised
+        self.tf = [Counter(tokens(c.text)) for c in chunks]
+        df = Counter(t for tf in self.tf for t in tf)
+        n = len(chunks)
+        self.idf = {t: math.log((1 + n) / (1 + d)) + 1 for t, d in df.items()}
+        self.vecs = [self._vec(tf) for tf in self.tf]
+
+    def _vec(self, tf: Counter) -> dict:
+        v = {t: (1 + math.log(c)) * self.idf[t] for t, c in tf.items() if t in self.idf}
+        norm = math.sqrt(sum(x * x for x in v.values())) or 1.0
+        return {t: x / norm for t, x in v.items()}
 
     def retrieve(self, question: str, k: int = TOP_K) -> List[Chunk]:
-        q = self.vec.transform([question])
-        scores = (self.matrix @ q.T).toarray().ravel()
-        top = np.argsort(-scores)[:k]
-        return [self.chunks[i] for i in top if scores[i] > 0] or [self.chunks[i] for i in top[:1]]
+        q = self._vec(Counter(tokens(question)))
+        scores = [sum(w * v.get(t, 0.0) for t, w in q.items()) for v in self.vecs]
+        top = sorted(range(len(scores)), key=lambda i: -scores[i])[:k]
+        hits = [self.chunks[i] for i in top if scores[i] > 0]
+        return hits or [self.chunks[top[0]]]
 
 
 def answer(question: str, contexts: List[Chunk]) -> str:
