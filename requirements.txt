@@ -1,8 +1,7 @@
 streamlit
 python-dotenv
-pymupdf
+pypdf
 numpy
 groq
 ragas==0.2.10
 langchain-groq
-scikit-learn
