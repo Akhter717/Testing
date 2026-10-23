@@ -1,13 +1,12 @@
-"""RAG pipeline: PDF -> chunks -> local embeddings -> FAISS -> Groq answer."""
+"""RAG pipeline: PDF -> chunks -> TF-IDF retrieval (no PyTorch) -> Groq answer."""
 import os
 from dataclasses import dataclass
 from typing import List
 
-import faiss
 import fitz  # PyMuPDF
 import numpy as np
 from groq import Groq
-from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 CHUNK_SIZE = 800      # characters
 CHUNK_OVERLAP = 150
@@ -24,18 +23,6 @@ class Chunk:
     text: str
     source: str
     page: int
-
-
-_embedder = None
-
-
-def get_embedder() -> SentenceTransformer:
-    global _embedder
-    if _embedder is None:
-        _embedder = SentenceTransformer(
-            os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-        )
-    return _embedder
 
 
 def chunk_pdf(file_bytes: bytes, filename: str) -> List[Chunk]:
@@ -57,16 +44,14 @@ class RagIndex:
         if not chunks:
             raise ValueError("No text could be extracted from the PDF(s). Scanned PDFs need OCR.")
         self.chunks = chunks
-        emb = get_embedder().encode(
-            [c.text for c in chunks], normalize_embeddings=True, show_progress_bar=False
-        )
-        self.index = faiss.IndexFlatIP(emb.shape[1])
-        self.index.add(np.asarray(emb, dtype="float32"))
+        self.vec = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True, stop_words="english")
+        self.matrix = self.vec.fit_transform([c.text for c in chunks])  # L2-normalised
 
     def retrieve(self, question: str, k: int = TOP_K) -> List[Chunk]:
-        q = get_embedder().encode([question], normalize_embeddings=True)
-        _, idx = self.index.search(np.asarray(q, dtype="float32"), min(k, len(self.chunks)))
-        return [self.chunks[i] for i in idx[0] if i != -1]
+        q = self.vec.transform([question])
+        scores = (self.matrix @ q.T).toarray().ravel()
+        top = np.argsort(-scores)[:k]
+        return [self.chunks[i] for i in top if scores[i] > 0] or [self.chunks[i] for i in top[:1]]
 
 
 def answer(question: str, contexts: List[Chunk]) -> str:
