@@ -1,4 +1,17 @@
 """RAGAS evaluation using a separate Groq judge model + local embeddings."""
+# Compatibility patch: ragas 0.2.x imports langchain_community's Vertex AI classes,
+# which newer langchain-community versions no longer ship. Register harmless stand-ins
+# BEFORE ragas is imported (same patch as Cell 1 of the notebook).
+import sys
+import types
+
+_m = types.ModuleType("langchain_community.chat_models.vertexai")
+_m.ChatVertexAI = type("ChatVertexAI", (), {})
+sys.modules["langchain_community.chat_models.vertexai"] = _m
+_m = types.ModuleType("langchain_community.llms.vertexai")
+_m.VertexAI = type("VertexAI", (), {})
+sys.modules["langchain_community.llms.vertexai"] = _m
+
 import asyncio
 import os
 from typing import Dict, List, Optional
