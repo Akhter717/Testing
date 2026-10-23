@@ -4,4 +4,7 @@ pypdf
 numpy
 groq
 ragas==0.2.10
-langchain-groq
+langchain<0.4
+langchain-core<0.4
+langchain-community==0.3.14
+langchain-groq<0.3
