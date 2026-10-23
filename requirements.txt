@@ -1,0 +1,10 @@
+streamlit
+python-dotenv
+pymupdf
+faiss-cpu
+numpy
+sentence-transformers
+groq
+ragas==0.2.10
+langchain-groq
+langchain-huggingface
