@@ -4,7 +4,8 @@ import os
 from typing import Dict, List, Optional
 
 from langchain_groq import ChatGroq
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
+from sklearn.feature_extraction.text import HashingVectorizer
 from ragas import SingleTurnSample
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from ragas.llms import LangchainLLMWrapper
@@ -18,6 +19,22 @@ from ragas.metrics import (
 )
 
 
+class HashingEmbeddings(Embeddings):
+    """Stateless keyword-style embeddings (no PyTorch / no downloads)."""
+
+    def __init__(self):
+        self.vec = HashingVectorizer(
+            n_features=2 ** 12, ngram_range=(1, 2), alternate_sign=False,
+            norm="l2", stop_words="english",
+        )
+
+    def embed_documents(self, texts):
+        return self.vec.transform(texts).toarray().tolist()
+
+    def embed_query(self, text):
+        return self.embed_documents([text])[0]
+
+
 def _build():
     judge = LangchainLLMWrapper(
         ChatGroq(
@@ -26,11 +43,7 @@ def _build():
             max_retries=5,
         )
     )
-    emb = LangchainEmbeddingsWrapper(
-        HuggingFaceEmbeddings(
-            model_name=os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-        )
-    )
+    emb = LangchainEmbeddingsWrapper(HashingEmbeddings())
     return judge, emb
 
 
